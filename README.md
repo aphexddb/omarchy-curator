@@ -30,7 +30,7 @@ Anything else the model returns is shown struck-through in the preview with the 
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/aphexddb/omarchy-ai-modes.git
+omarchy plugin add https://github.com/aphexddb/omarchy-curator.git
 # review the code, then:
 omarchy plugin enable curator.desktop
 omarchy bar put curator.desktop --section right
@@ -103,13 +103,13 @@ node test/model-test.js
 Manifest against the shell's schema (from an omarchy checkout):
 
 ```bash
-omarchy plugin validate /path/to/omarchy-ai-modes
+omarchy plugin validate /path/to/omarchy-curator
 ```
 
 On an Omarchy box, without waiting for a git install:
 
 ```bash
-git clone https://github.com/aphexddb/omarchy-ai-modes.git ~/.config/omarchy/plugins/curator.desktop
+git clone https://github.com/aphexddb/omarchy-curator.git ~/.config/omarchy/plugins/curator.desktop
 omarchy-shell shell rescanPlugins
 omarchy plugin enable curator.desktop
 omarchy bar put curator.desktop --section right
