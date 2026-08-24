@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "curator.desktop",
+  "name": "Curator",
+  "version": "0.1.0",
+  "author": "Gardiner Allen",
+  "license": "MIT",
+  "description": "AI desktop curator: reasons about your preferences and live desktop context, then recommends the ideal desktop state. Advisory first — nothing is applied without confirmation, and undo is one call away.",
+  "kinds": ["service", "panel", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "panel": "Panel.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Curator",
+    "description": "Current inferred mode badge. Click to open the Curator panel, right-click to ask for a suggestion now.",
+    "category": "AI",
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {
+      "showConfidence": "On"
+    },
+    "schema": [
+      { "key": "showConfidence", "type": "enum", "label": "Show confidence", "options": ["On", "Off"], "defaultValue": "On", "description": "Append the model's confidence to the mode badge, e.g. 'Deep Work · 87%'." }
+    ]
+  }
+}

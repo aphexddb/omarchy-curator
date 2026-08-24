@@ -1,0 +1,81 @@
+#!/bin/bash
+
+# curator-agent <prompt-file> [prefs-file]
+#
+# Thin, headless bridge from the Curator service to a model. Prints the raw
+# model output on stdout; the service extracts and validates the JSON plan.
+# Routing: the user's default Omarchy agent, unless prefs set
+# privacy.preferLocalLLM, in which case a local Ollama model goes first.
+# Either path falls back to the other before giving up.
+
+set -o pipefail
+
+prompt_file="${1:-}"
+prefs_file="${2:-$HOME/.config/omarchy/curator/prefs.json}"
+
+if [[ -z $prompt_file || ! -f $prompt_file ]]; then
+  echo "curator-agent: prompt file not found: ${prompt_file:-<none>}" >&2
+  exit 1
+fi
+
+prefer_local=false
+ollama_model=""
+if [[ -f $prefs_file ]]; then
+  prefer_local=$(jq -r '.privacy.preferLocalLLM // false' "$prefs_file" 2>/dev/null)
+  ollama_model=$(jq -r '.privacy.ollamaModel // ""' "$prefs_file" 2>/dev/null)
+fi
+
+run_ollama() {
+  command -v ollama &>/dev/null || return 1
+  local model=$ollama_model
+  if [[ -z $model ]]; then
+    model=$(ollama list 2>/dev/null | awk 'NR==2 {print $1}')
+  fi
+  [[ -n $model ]] || return 1
+  timeout 180 ollama run "$model" <"$prompt_file"
+}
+
+run_default_agent() {
+  local agent
+  agent=$(omarchy-default-agent 2>/dev/null)
+  [[ -n $agent ]] || return 1
+
+  local prompt
+  prompt=$(<"$prompt_file")
+
+  # Only agents with a real non-interactive mode are wired up. The rest fall
+  # through so the ollama path can catch them.
+  case "$agent" in
+  claude)
+    timeout 180 claude -p "$prompt"
+    ;;
+  codex)
+    timeout 180 codex exec "$prompt"
+    ;;
+  opencode)
+    timeout 180 opencode run "$prompt"
+    ;;
+  crush)
+    timeout 180 crush run "$prompt"
+    ;;
+  grok)
+    timeout 180 grok -p "$prompt"
+    ;;
+  *)
+    echo "curator-agent: no headless mode wired for default agent '$agent'" >&2
+    return 1
+    ;;
+  esac
+}
+
+if [[ $prefer_local == "true" ]]; then
+  run_ollama || run_default_agent
+else
+  run_default_agent || run_ollama
+fi
+
+status=$?
+if ((status != 0)); then
+  echo "curator-agent: no model produced a response (default agent + ollama both failed)" >&2
+fi
+exit $status
