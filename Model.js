@@ -54,6 +54,10 @@ function defaultPrefs() {
     ],
     allowedApps: ["alacritty", "nautilus", "chromium", "obsidian", "spotify"],
     autoApplyTrusted: false,
+    learning: {
+      enabled: true,
+      sampleIntervalSeconds: 90
+    },
     privacy: {
       preferLocalLLM: false,
       ollamaModel: "",
@@ -71,6 +75,11 @@ function defaultState() {
     snapshot: null,
     appliedTypes: [],
     lastError: "",
+    listening: false,
+    listenStartedAt: 0,
+    listenEndedAt: 0,
+    listenDay: 0,
+    sqliteMissing: false,
     updatedAt: 0
   };
 }
@@ -120,17 +129,22 @@ function filterContext(raw, prefs) {
 
 // ---------------------------------------------------------------- prompt
 
-function buildPrompt(skillText, prefs, context, request) {
-  var prefsForModel = {
-    modes: prefs.modes,
-    timeRules: prefs.timeRules,
-    allowedApps: prefs.allowedApps
-  };
-  return skillText
-    + "\n\n## User preferences\n```json\n" + JSON.stringify(prefsForModel, null, 2)
+// `habits` is the parsed output of the learnings aggregation query
+// (Learnings.js), or null when there is nothing observed yet.
+function buildPrompt(skillText, prefs, context, request, habits) {
+  var prompt = skillText
+    + "\n\n## User preferences\n```json\n" + JSON.stringify({
+        modes: prefs.modes,
+        timeRules: prefs.timeRules,
+        allowedApps: prefs.allowedApps
+      }, null, 2)
     + "\n```\n\n## Live desktop context\n```json\n" + JSON.stringify(context, null, 2)
-    + "\n```\n\n## Request\n" + (request && request.trim() ? request.trim() : "What should I be seeing right now?")
+    + "\n```\n";
+  if (habits)
+    prompt += "\n## Learned habits\n```json\n" + JSON.stringify(habits, null, 2) + "\n```\n";
+  prompt += "\n## Request\n" + (request && request.trim() ? request.trim() : "What should I be seeing right now?")
     + "\n\nReply with the single JSON object described in the output contract. No prose before or after it.\n";
+  return prompt;
 }
 
 // ---------------------------------------------------------------- parsing

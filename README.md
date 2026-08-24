@@ -13,7 +13,8 @@ bar badge ──click──▶ panel (chat + plan preview + Apply/Undo)
                         │ omarchy-shell curator <method>
                         ▼
 service (always loaded) ── context probe (hyprctl -j, time, battery, theme, DND)
-                        ── prompt = skill + prefs + context + request
+                        ── learned habits (aggregated from ~/.local/state/omarchy/curator.db)
+                        ── prompt = skill + prefs + context + habits + request
                         ── bin/curator-agent (default agent, headless — or Ollama)
                         ── JSON plan → validated against the action allowlist
                         ── Apply: snapshot first, then run · Undo: restore snapshot
@@ -46,7 +47,7 @@ The plugin needs a model to talk to: either a default agent with a headless mode
 
 ## Usage
 
-- **Bar badge** — shows the inferred mode (`✦ deep-work · 87%`). Left-click opens the panel, right-click asks for a suggestion in the background (you get a notification when it's ready).
+- **Bar badge** — shows the inferred mode (`✦ deep-work · 87%`), or `✦ learning · 3/7d` during the listen-only period. Left-click opens the panel, right-click asks for a suggestion in the background (you get a notification when it's ready).
 - **Panel** — free-text requests ("set up for deep work", "what should I be seeing right now?"), the rationale, the validated action plan, an optional layout silhouette, and Suggest / Apply / Undo / Dismiss. `Ctrl+Enter` applies, `Ctrl+U` undoes, `Esc` closes.
 - **CLI** — everything is also scriptable:
 
@@ -56,7 +57,29 @@ omarchy-shell curator status
 omarchy-shell curator apply
 omarchy-shell curator undo
 omarchy-shell curator dismiss
+omarchy-shell curator finishListening   # end the listen-only period early
 ```
+
+## Learning
+
+On first run Curator enters a **listen-only period of 7 days**. During it there are **no AI calls at all** — the service just samples your desktop cheaply (every 90 seconds by default) and stores what it sees:
+
+- timestamp, hour of day, day of week
+- focused window class (never titles, never screenshots)
+- open windows per workspace and the active workspace
+- battery percentage and charging state (from `/sys/class/power_supply/BAT*`)
+- current theme, DND state, night light state
+
+While listening, `suggest` answers `listening (day 3/7)` instead of calling the agent, the bar badge shows `✦ learning · 3/7d`, and the panel shows the learning status plus a read-only list of your installed themes. The listen period start is tracked in the shared state file, so it survives shell restarts.
+
+Escape hatches:
+
+- `omarchy-shell curator finishListening` — end the period early and unlock suggestions now.
+- `"learning": { "enabled": false }` in prefs — disable listen mode and sampling entirely.
+
+Samples land in a SQLite database at `~/.local/state/omarchy/curator.db` (`PRAGMA user_version = 1`, one `samples` table: `ts, hour, dow, focused_class, active_workspace, window_count, workspace_windows, battery, charging, theme, dnd, nightlight`). Inserts are buffered in memory and flushed in batches — one `sqlite3` invocation per handful of samples — so the cost stays negligible. If the `sqlite3` CLI is missing, learning degrades gracefully: a warning is logged, `sqliteMissing` is noted in the state file, and everything else keeps working.
+
+**After the listen period, sampling continues forever at one fifth of the rate** (every 7.5 minutes by default) so the habit picture keeps tracking how your usage drifts. From then on, every `suggest` runs one aggregation query over the last 30 days — top focused apps by time of day, theme usage share, battery/charging patterns, DND share — and injects the result as a compact `## Learned habits` JSON section into the prompt. All aggregation SQL lives in `Learnings.js`.
 
 ## Preferences
 
@@ -79,6 +102,10 @@ omarchy-shell curator dismiss
   ],
   "allowedApps": ["alacritty", "nautilus", "chromium", "obsidian", "spotify"],
   "autoApplyTrusted": false,
+  "learning": {
+    "enabled": true,
+    "sampleIntervalSeconds": 90
+  },
   "privacy": {
     "preferLocalLLM": false,
     "ollamaModel": "",
@@ -89,6 +116,7 @@ omarchy-shell curator dismiss
 
 - `modes` — free-form; the whole object is handed to the model, so extra keys (music, gaps, whatever) are fine and become part of the reasoning.
 - `autoApplyTrusted` + per-mode `trusted: true` — both must be set before a plan applies without confirmation.
+- `learning.enabled` — set `false` to turn off the listen-only period and all sampling. `learning.sampleIntervalSeconds` sets the listen-period sampling cadence (post-listen sampling runs at 5x that interval).
 - `privacy.preferLocalLLM` — route to Ollama first; `ollamaModel` pins a model (otherwise the first installed one is used).
 - `privacy.sendWindowTitles` — set `false` to send only window classes, never titles.
 
@@ -116,11 +144,12 @@ omarchy bar put curator.desktop --section right
 omarchy-shell curator suggest ""          # then watch: omarchy-shell curator status
 ```
 
-Debug artifacts land in `~/.local/state/omarchy/`: `curator-prompt.txt` (the exact prompt sent), `curator-response.txt` (the raw model output), `curator.json` (shared state). Saving any file in the plugin directory hot-reloads it.
+Debug artifacts land in `~/.local/state/omarchy/`: `curator-prompt.txt` (the exact prompt sent), `curator-response.txt` (the raw model output), `curator.json` (shared state), `curator.db` (the habit samples — inspect with `sqlite3 ~/.local/state/omarchy/curator.db 'SELECT * FROM samples ORDER BY ts DESC LIMIT 20'`). Saving any file in the plugin directory hot-reloads it.
 
 ## Privacy, safety, limitations
 
-- Context sent to the model: window classes (titles optional), workspace ids, time, battery, current theme, DND state. Never screenshots, never pids or addresses.
+- Context sent to the model: window classes (titles optional), workspace ids, time, battery, current theme, DND state, plus the aggregated learned habits. Never screenshots, never pids or addresses.
+- Learned samples never leave your machine: they live in a local SQLite file, contain window classes but never titles, and only the compact aggregates reach the model.
 - Undo restores theme, focused workspace, DND, and night light from the pre-apply snapshot — it cannot un-move windows or close launched apps.
 - Headless agent support: claude, codex, opencode, crush, grok. Others (pi, omp, ori, agy, copilot) fall through to Ollama.
 - Same trust model as every Omarchy plugin: it runs unsandboxed inside `omarchy-shell`. Review before enabling.
