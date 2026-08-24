@@ -3,8 +3,10 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Learnings.js" as Learnings
 
-// Curator bar badge: shows the currently inferred or applied mode. Left-click
+// Curator bar badge: shows the currently inferred or applied mode, or the
+// learning progress during the initial listen-only period. Left-click
 // toggles the Curator panel, right-click asks for a fresh suggestion without
 // opening anything. Renders from the shared state file the service writes.
 BarWidget {
@@ -21,9 +23,12 @@ BarWidget {
 
   readonly property string status: curatorState ? String(curatorState.status || "idle") : "idle"
   readonly property var recommendation: curatorState ? curatorState.recommendation : null
+  readonly property bool listening: curatorState ? curatorState.listening === true : false
 
   function badgeText() {
     if (root.vertical) return "✦"
+    if (root.listening)
+      return "✦ learning · " + (curatorState.listenDay || 1) + "/" + Learnings.LISTEN_DAYS + "d"
     if (status === "thinking") return "✦ …"
     if ((status === "ready" || status === "applied") && recommendation && recommendation.mode) {
       var label = "✦ " + recommendation.mode

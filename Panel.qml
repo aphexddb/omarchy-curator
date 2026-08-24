@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import qs.Commons
 import qs.Ui
+import "Learnings.js" as Learnings
 
 // Curator panel: summoned with `omarchy-shell shell toggle curator.desktop "{}"`.
 // Shows the current recommendation — rationale, the validated action plan, and
@@ -15,6 +16,7 @@ Item {
 
   property bool opened: false
   property var curatorState: ({ status: "idle", mode: "", recommendation: null, lastError: "" })
+  property var themes: []
 
   readonly property string home: Quickshell.env("HOME")
   readonly property string statePath: home + "/.local/state/omarchy/curator.json"
@@ -31,9 +33,11 @@ Item {
   readonly property var recommendation: curatorState && curatorState.recommendation ? curatorState.recommendation : null
   readonly property string status: curatorState ? String(curatorState.status || "idle") : "idle"
   readonly property bool busy: status === "thinking" || status === "applying"
+  readonly property bool listening: curatorState ? curatorState.listening === true : false
 
   function open(payloadJson) {
     root.opened = true
+    if (root.listening) themesProc.running = true
     var payload = null
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
     if (payload && payload.request) {
@@ -57,12 +61,14 @@ Item {
   }
 
   function sendRequest() {
-    if (root.busy) return
+    if (root.busy || root.listening) return
     curatorCall(["suggest", requestInput.text])
     requestInput.text = ""
   }
 
   function statusLabel() {
+    if (root.listening)
+      return "learning · day " + (curatorState.listenDay || 1) + "/" + Learnings.LISTEN_DAYS
     if (status === "thinking") return "thinking…"
     if (status === "applying") return "applying…"
     if (status === "ready" && recommendation)
@@ -82,6 +88,25 @@ Item {
       try { root.curatorState = JSON.parse(text()) } catch (e) {}
     }
     onFileChanged: reload()
+  }
+
+  // Read-only theme inventory shown during the listen period. Refreshed on
+  // every open so newly installed themes appear.
+  Process {
+    id: themesProc
+    command: ["omarchy-theme-list"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var lines = String(text || "").trim().split("\n")
+        var out = []
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i].trim()
+          if (line) out.push(line)
+        }
+        root.themes = out
+      }
+    }
   }
 
   component CuratorButton: Rectangle {
@@ -224,9 +249,59 @@ Item {
                 wrapMode: Text.WordWrap
               }
 
+              // Listen-only period: a learning status and a read-only theme
+              // inventory instead of the recommendation UI.
               Text {
                 width: parent.width
-                visible: !root.recommendation && root.status !== "error"
+                visible: root.listening
+                text: "Learning your desktop — Curator is quietly sampling which apps, workspaces, and themes you use. "
+                  + "Suggestions unlock after day " + Learnings.LISTEN_DAYS
+                  + ", or right away with `omarchy-shell curator finishListening`."
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
+                wrapMode: Text.WordWrap
+              }
+
+              Text {
+                width: parent.width
+                visible: root.listening && root.themes.length > 0
+                text: "Installed themes"
+                color: root.foreground
+                opacity: 0.65
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+              }
+
+              Repeater {
+                model: root.listening ? root.themes : []
+
+                delegate: Row {
+                  required property var modelData
+                  width: bodyColumn.width
+                  spacing: Style.spacing.controlGap
+
+                  Text {
+                    text: "•"
+                    color: root.accent
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                  }
+
+                  Text {
+                    width: parent.width - Style.space(20)
+                    text: String(modelData)
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: !root.listening && !root.recommendation && root.status !== "error"
                 text: root.busy
                   ? "Reading your desktop and asking the agent…"
                   : "Ask what you should be seeing right now, or describe what you want to set up."
@@ -350,7 +425,7 @@ Item {
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
               clip: true
-              enabled: !root.busy
+              enabled: !root.busy && !root.listening
               onAccepted: root.sendRequest()
             }
 
@@ -358,7 +433,7 @@ Item {
               anchors.fill: requestInput
               verticalAlignment: Text.AlignVCenter
               visible: requestInput.text.length === 0 && !requestInput.activeFocus
-              text: "What should I be seeing right now?"
+              text: root.listening ? "Learning — suggestions unlock after the listen period" : "What should I be seeing right now?"
               color: root.foreground
               opacity: 0.4
               font.family: root.fontFamily
@@ -373,7 +448,7 @@ Item {
 
             CuratorButton {
               label: "Suggest"
-              enabled: !root.busy
+              enabled: !root.busy && !root.listening
               onActivated: root.curatorCall(["suggest", requestInput.text])
             }
 
